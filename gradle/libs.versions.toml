@@ -1,0 +1,28 @@
+
+[versions]
+kotlin-version = "1.9.24"
+kotlinx-coroutines-version = "1.8.1"
+ktor-version = "2.3.12"
+logback-version = "1.4.14"
+kotlin-graphql-version = "8.1.0"
+mockk-version = "1.13.11"
+
+[libraries]
+# ktor-server
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback-version" }
+ktor-server-core = { module = "io.ktor:ktor-server-core-jvm", version.ref = "ktor-version" }
+ktor-server-netty = { module = "io.ktor:ktor-server-netty-jvm", version.ref = "ktor-version" }
+ktor-server-config-yaml = { module = "io.ktor:ktor-server-config-yaml", version.ref = "ktor-version" }
+# graphql-kotlin
+graphql-kotlin-ktor-server = { module = "com.expediagroup:graphql-kotlin-ktor-server", version.ref = "kotlin-graphql-version" }
+# test
+kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin-version" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinx-coroutines-version" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk-version" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host-jvm", version.ref = "ktor-version" }
+ktor-server-cio = { group = "io.ktor", name = "ktor-server-cio", version.ref = "ktor-version" }
+ktor-client-content = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor-version" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin-version" }
+ktor = { id = "io.ktor.plugin", version.ref = "ktor-version" }

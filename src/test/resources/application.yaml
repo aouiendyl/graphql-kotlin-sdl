@@ -1,0 +1,6 @@
+ktor:
+    application:
+        modules:
+            - aouiendyl.graphql.server.ktor.sdl.GraphQLPluginTestKt.testGraphQLModule
+    deployment:
+        port: 8080

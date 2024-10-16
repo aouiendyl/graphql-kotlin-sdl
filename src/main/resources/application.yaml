@@ -1,0 +1,6 @@
+ktor:
+    application:
+        modules:
+            - aouiendyl.graphql.server.ktor.GraphQLModuleKt.graphQLModule
+    deployment:
+        port: 8080

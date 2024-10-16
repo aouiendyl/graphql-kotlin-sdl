@@ -1,0 +1,258 @@
+package aouiendyl.graphql.server.ktor.sdl
+
+import com.expediagroup.graphql.apq.cache.AutomaticPersistedQueriesCache
+import com.expediagroup.graphql.apq.cache.DefaultAutomaticPersistedQueriesCache
+import com.expediagroup.graphql.dataloader.KotlinDataLoaderRegistryFactory
+import com.expediagroup.graphql.generator.execution.KotlinDataFetcherFactoryProvider
+import com.expediagroup.graphql.generator.execution.SimpleKotlinDataFetcherFactoryProvider
+import com.expediagroup.graphql.generator.scalars.IDValueUnboxer
+import com.expediagroup.graphql.server.ktor.DefaultKtorGraphQLContextFactory
+import com.expediagroup.graphql.server.ktor.KtorGraphQLContextFactory
+import com.expediagroup.graphql.server.ktor.KtorGraphQLRequestParser
+import com.expediagroup.graphql.server.ktor.subscriptions.DefaultKtorGraphQLSubscriptionContextFactory
+import com.expediagroup.graphql.server.ktor.subscriptions.DefaultKtorGraphQLSubscriptionHooks
+import com.expediagroup.graphql.server.ktor.subscriptions.DefaultKtorGraphQLSubscriptionRequestParser
+import com.expediagroup.graphql.server.ktor.subscriptions.KtorGraphQLSubscriptionContextFactory
+import com.expediagroup.graphql.server.ktor.subscriptions.KtorGraphQLSubscriptionHooks
+import com.expediagroup.graphql.server.ktor.subscriptions.KtorGraphQLSubscriptionRequestParser
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import graphql.execution.DataFetcherExceptionHandler
+import graphql.execution.ExecutionIdProvider
+import graphql.execution.SimpleDataFetcherExceptionHandler
+import graphql.execution.instrumentation.Instrumentation
+import graphql.execution.preparsed.PreparsedDocumentProvider
+import graphql.schema.GraphQLSchema
+import io.ktor.server.config.ApplicationConfig
+import io.ktor.server.config.tryGetString
+import kotlin.reflect.KClass
+
+/**
+ * Configuration properties that define supported GraphQL configuration options.
+ *
+ * ```
+ * schema {
+ *   packages = listOf("com.example")
+ *   queries = listOf() // non-federated schemas, require at least a single query
+ *   mutations = listOf()
+ *   subscriptions = listOf()
+ *   schemaObject = null
+ *   hooks = NoopSchemaGeneratorHooks
+ *   topLevelNames = TopLevelNames()
+ *   federation {
+ *     enabled = false
+ *     tracing {
+ *       enabled = true
+ *       debug = false
+ *     }
+ *   }
+ *   typeHierarchy = null
+ * }
+ * engine {
+ *   automaticPersistedQueries {
+ *      enabled = false
+ *   }
+ *   batching {
+ *     enabled = true
+ *     strategy = SYNC_EXHAUSTION
+ *   }
+ *   introspection {
+ *      enabled = true
+ *   }
+ *   dataFetcherFactoryProvider = SimpleKotlinDataFetcherFactoryProvider()
+ *   dataLoaderRegistryFactory = KotlinDataLoaderRegistryFactory()
+ *   exceptionHandler = SimpleDataFetcherExceptionHandler()
+ *   executionIdProvider = null
+ *   idValueUnboxer = IDValueUnboxer()
+ *   instrumentations = emptyList()
+ *   preparsedDocumentProvider = null
+ * }
+ * server {
+ *   contextFactory = DefaultKtorGraphQLContextFactory()
+ *   jacksonConfiguration = { }
+ *   requestParser = KtorGraphQLRequestParser(jacksonObjectMapper())
+ *   subscriptions {
+ *     requestParser = DefaultKtorGraphQLSubscriptionRequestParser()
+ *     contextFactory = DefaultKtorGraphQLSubscriptionContextFactory()
+ *     hooks = DefaultKtorGraphQLSubscriptionHooks()
+ *     connectionInitTimeout = 60_000
+ *   }
+ * }
+ * ```
+ */
+class GraphQLSdlConfiguration(config: ApplicationConfig) {
+
+    /** Configure schema generation process */
+    val schema: SchemaConfiguration = SchemaConfiguration(config)
+    fun schema(schemaConfig: SchemaConfiguration.() -> Unit) {
+        schema.apply(schemaConfig)
+    }
+
+    /** Configure GraphQL engine that will be processing the requests */
+    val engine: EngineConfiguration = EngineConfiguration(config)
+    fun engine(engineConfig: EngineConfiguration.() -> Unit) {
+        engine.apply(engineConfig)
+    }
+
+    /** Configure GraphQL server */
+    val server: ServerConfiguration = ServerConfiguration(config)
+    fun server(serverConfig: ServerConfiguration.() -> Unit) {
+        server.apply(serverConfig)
+    }
+
+    /**
+     * Configuration properties that control schema generation process.
+     */
+    class SchemaConfiguration(config: ApplicationConfig) {
+        /** GraphQL schema object */
+        lateinit var gQlSchema: GraphQLSchema
+        /** Apollo Federation configuration */
+        val federation: FederationConfiguration = FederationConfiguration(config)
+        fun federation(federationConfig: FederationConfiguration.() -> Unit) {
+            federation.apply(federationConfig)
+        }
+    }
+
+    /**
+     * Apollo Federation configuration properties.
+     */
+    class FederationConfiguration(config: ApplicationConfig) {
+        /**
+         * Boolean flag indicating whether to generate federated GraphQL model
+         */
+        var enabled: Boolean = config.tryGetString("graphql.schema.federation.enabled").toBoolean()
+
+        /** Explicit list of entity classes */
+        var entities: List<KClass<*>>? = null
+
+        /**
+         * Federation tracing config
+         */
+        var tracing: FederationTracingConfiguration = FederationTracingConfiguration(config)
+        fun tracing(tracingConfig: FederationTracingConfiguration.() -> Unit) {
+            tracing.apply(tracingConfig)
+        }
+    }
+
+    /**
+     * Apollo Federation tracing configuration properties
+     */
+    class FederationTracingConfiguration(config: ApplicationConfig) {
+        /**
+         * Flag to enable or disable field tracing for the Apollo Gateway.
+         * Default is true as this is only used if the parent config is enabled.
+         */
+        var enabled: Boolean = config.tryGetString("graphql.schema.federation.tracing.enabled")?.toBoolean() ?: true
+
+        /**
+         * Flag to enable or disable debug logging
+         */
+        var debug: Boolean = config.tryGetString("graphql.schema.federation.tracing.enabled").toBoolean()
+    }
+
+    /** Configuration of a GraphQL engine */
+    class EngineConfiguration(config: ApplicationConfig) {
+        /**
+         * Configuration for automatic persisted queries support.
+         *
+         * Warning: If you need custom preparsed document provider, do not configure APQ settings.
+         */
+        val automaticPersistedQueries: AutomaticPersistedQueriesConfiguration = AutomaticPersistedQueriesConfiguration(config)
+        fun automaticPersistedQueries(apqConfig: AutomaticPersistedQueriesConfiguration.() -> Unit) {
+            automaticPersistedQueries.apply(apqConfig)
+        }
+        /** Automatic batching configuration */
+        var batching: BatchingConfiguration = BatchingConfiguration(config)
+        fun batching(batchingConfig: BatchingConfiguration.() -> Unit) {
+            batching.apply(batchingConfig)
+        }
+        /** Introspection configuration */
+        val introspection: IntrospectionConfiguration = IntrospectionConfiguration(config)
+        fun introspection(introspectionConfig: IntrospectionConfiguration.() -> Unit) {
+            introspection.apply(introspectionConfig)
+        }
+        /** Factory for creating function and property data fetcher factories. */
+        var dataFetcherFactoryProvider: KotlinDataFetcherFactoryProvider = SimpleKotlinDataFetcherFactoryProvider()
+        /** Factory for creating data loader registry */
+        var dataLoaderRegistryFactory: KotlinDataLoaderRegistryFactory = KotlinDataLoaderRegistryFactory()
+        /** GraphQL exception handler */
+        var exceptionHandler: DataFetcherExceptionHandler = SimpleDataFetcherExceptionHandler()
+        /** Execution ID provider */
+        var executionIdProvider: ExecutionIdProvider? = null
+        /** ID value class unboxer */
+        var idValueUnboxer: IDValueUnboxer = IDValueUnboxer()
+        /** List of instrumentations */
+        var instrumentations: List<Instrumentation> = emptyList()
+        /**
+         * Preparsed document provider that allows for safe listing and/or document caching.
+         *
+         * Warning: If using APQ auto configuration settings, preparsed document provider should not be set.
+         */
+        var preparsedDocumentProvider: PreparsedDocumentProvider? = null
+    }
+
+    /**
+     * Introspection configuration properties.
+     */
+    class IntrospectionConfiguration(config: ApplicationConfig) {
+        /** Boolean flag indicating whether introspection queries are enabled. */
+        var enabled: Boolean = config.tryGetString("graphql.engine.introspection.enabled")?.toBoolean() ?: true
+    }
+
+    /**
+     * Approaches for batching transactions of a set of GraphQL Operations.
+     */
+    enum class BatchingStrategy { SYNC_EXHAUSTION }
+
+    /**
+     * Batching configuration properties.
+     */
+    class BatchingConfiguration(config: ApplicationConfig) {
+        /** Boolean flag to enable or disable batching for a set of GraphQL Operations. */
+        var enabled: Boolean = config.tryGetString("graphql.engine.batching.enabled").toBoolean()
+
+        /** configure the [BatchingStrategy] that will be used when batching is enabled for a set of GraphQL Operations. */
+        var strategy: BatchingStrategy = config.tryGetString("graphql.engine.batching.strategy").toBatchingStrategy()
+    }
+
+    /**
+     * Configuration for setting up automatic persisted query support.
+     */
+    class AutomaticPersistedQueriesConfiguration(config: ApplicationConfig) {
+        /** Boolean flag to enable or disable Automatic Persisted Queries. */
+        var enabled: Boolean = config.tryGetString("graphql.engine.automaticPersistedQueries.enabled").toBoolean()
+        /** APQ query cache */
+        var cache: AutomaticPersistedQueriesCache = DefaultAutomaticPersistedQueriesCache()
+    }
+
+    /** Configuration for configuring GraphQL server */
+    class ServerConfiguration(config: ApplicationConfig) {
+        // TODO support custom servers/request handlers
+        /** Custom GraphQL context factory */
+        var contextFactory: KtorGraphQLContextFactory = DefaultKtorGraphQLContextFactory()
+        /** Custom Jackson ObjectMapper configuration */
+        var jacksonConfiguration: ObjectMapper.() -> Unit = {}
+        /** Custom request parser */
+        var requestParser: KtorGraphQLRequestParser = KtorGraphQLRequestParser(jacksonObjectMapper().apply(jacksonConfiguration))
+        /** GraphQL WS subscription configuration */
+        val subscriptions: KtorSubscriptionConfiguration = KtorSubscriptionConfiguration(config)
+        fun subscriptions(subscriptionConfig: KtorSubscriptionConfiguration.() -> Unit) {
+            subscriptions.apply(subscriptionConfig)
+        }
+    }
+
+    /** Configuration for configuring GraphQL Web Socket subscription server */
+    class KtorSubscriptionConfiguration(config: ApplicationConfig) {
+        /** Custom WebSocket subscription parser */
+        var requestParser: KtorGraphQLSubscriptionRequestParser = DefaultKtorGraphQLSubscriptionRequestParser()
+        /** Custom WebSocket subscription context factory */
+        var contextFactory: KtorGraphQLSubscriptionContextFactory = DefaultKtorGraphQLSubscriptionContextFactory()
+        /** Custom WebSocket subscription hooks */
+        var hooks: KtorGraphQLSubscriptionHooks = DefaultKtorGraphQLSubscriptionHooks()
+        /** Server timeout between establishing web socket connection and receiving connection-init message */
+        var connectionInitTimeout: Long = config.tryGetString("graphql.server.subscription.connectionInitTimeout")?.toLongOrNull() ?: 60_000
+    }
+}
+
+private fun String?.toBatchingStrategy(): GraphQLSdlConfiguration.BatchingStrategy =
+    GraphQLSdlConfiguration.BatchingStrategy.values().firstOrNull { strategy -> strategy.name == this } ?: GraphQLSdlConfiguration.BatchingStrategy.SYNC_EXHAUSTION
